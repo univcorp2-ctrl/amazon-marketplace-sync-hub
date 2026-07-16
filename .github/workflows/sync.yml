@@ -1,0 +1,48 @@
+name: Marketplace Sync
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      APP_MODE: production
+      API_LIVE_ENABLED: "true"
+      DATABASE_URL: sqlite:///./data/app.db
+      AMAZON_LWA_CLIENT_ID: ${{ secrets.AMAZON_LWA_CLIENT_ID }}
+      AMAZON_LWA_CLIENT_SECRET: ${{ secrets.AMAZON_LWA_CLIENT_SECRET }}
+      AMAZON_REFRESH_TOKEN: ${{ secrets.AMAZON_REFRESH_TOKEN }}
+      SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
+      SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
+      SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
+      SHOPEE_ACCESS_TOKEN: ${{ secrets.SHOPEE_ACCESS_TOKEN }}
+      SHOPEE_DEFAULT_CATEGORY_ID: ${{ vars.SHOPEE_DEFAULT_CATEGORY_ID }}
+      SHOPEE_LOGISTIC_INFO: ${{ vars.SHOPEE_LOGISTIC_INFO }}
+      QOO10_API_KEY: ${{ secrets.QOO10_API_KEY }}
+      QOO10_USER_ID: ${{ secrets.QOO10_USER_ID }}
+      QOO10_PASSWORD: ${{ secrets.QOO10_PASSWORD }}
+      QOO10_DEFAULT_CATEGORY_ID: ${{ vars.QOO10_DEFAULT_CATEGORY_ID }}
+      QOO10_SHIPPING_NO: ${{ vars.QOO10_SHIPPING_NO }}
+      QOO10_CONTACT_TEL: ${{ vars.QOO10_CONTACT_TEL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install .
+      - run: mkdir -p data
+      - name: Run synchronized price and availability update
+        run: python -m app.cli sync | tee sync-result.json
+      - name: Upload sync result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-sync-result
+          path: |
+            sync-result.json
+            data/
+          if-no-files-found: warn
