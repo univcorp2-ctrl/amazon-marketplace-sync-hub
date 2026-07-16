@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+data/*.db
+data/*.db-*
+dist/
+coverage.xml
+junit.xml
+.DS_Store
