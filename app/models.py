@@ -31,9 +31,7 @@ class ProductRecord(BaseModel):
     raw_offers: dict[str, Any] = Field(default_factory=dict)
     fetched_at: str = Field(default_factory=utc_now_iso)
     source: str = "amazon-sp-api"
-    availability_note: str = (
-        "Amazon retail exact quantity is not exposed; available is inferred from offer data."
-    )
+    availability_note: str = "Amazon retail exact quantity is not exposed; available is inferred from offer data."
 
     @field_validator("asin")
     @classmethod
