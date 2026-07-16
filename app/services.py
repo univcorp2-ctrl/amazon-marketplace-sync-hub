@@ -87,11 +87,17 @@ class MarketplaceService:
                 "item_sku": sku,
                 "category_id": category_id,
                 "original_price": price,
-                "seller_stock": [{"stock": stock}],
+                "normal_stock": stock,
                 "logistic_info": self.settings.shopee_logistic_info,
                 "condition": "NEW",
+                "item_status": "NORMAL",
+                "pre_order": {"is_pre_order": False, "days_to_ship": 2},
                 "weight": 0.8,
-                "dimension": {"package_length": 30, "package_width": 20, "package_height": 10},
+                "dimension": {
+                    "package_length": 30,
+                    "package_width": 20,
+                    "package_height": 10,
+                },
                 "image_urls": image_urls,
             }
             response = await self.shopee.list_product(payload.copy())
@@ -106,7 +112,9 @@ class MarketplaceService:
                 target_stock=stock,
                 payload={"request": payload, "response": response},
             )
-            results.append({"channel": "shopee", "external_id": external_id, "response": response})
+            results.append(
+                {"channel": "shopee", "external_id": external_id, "response": response}
+            )
 
         if "qoo10" in request.channels:
             category_id = request.qoo10_category_id or self.settings.qoo10_default_category_id
@@ -147,7 +155,9 @@ class MarketplaceService:
                 target_stock=stock,
                 payload={"request": payload, "response": response},
             )
-            results.append({"channel": "qoo10", "external_id": external_id, "response": response})
+            results.append(
+                {"channel": "qoo10", "external_id": external_id, "response": response}
+            )
         return results
 
     async def sync_all(self) -> dict[str, Any]:
@@ -174,9 +184,14 @@ class MarketplaceService:
                     payload=listing["payload"],
                 )
                 results.append(
-                    {"channel": listing["channel"], "seller_sku": listing["seller_sku"], "price": price, "stock": stock}
+                    {
+                        "channel": listing["channel"],
+                        "seller_sku": listing["seller_sku"],
+                        "price": price,
+                        "stock": stock,
+                    }
                 )
-            except Exception as exc:  # noqa: BLE001 - sync should continue per listing
+            except Exception as exc:  # noqa: BLE001 - continue per listing
                 errors.append({"seller_sku": listing["seller_sku"], "error": str(exc)})
         detail = {"updated": results, "errors": errors}
         self.db.finish_sync(run_id, "partial" if errors else "success", detail)
