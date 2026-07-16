@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Amazon Marketplace Sync Hub</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0f1d30;--line:#263a55;--text:#edf5ff;--muted:#9cb0c9;--blue:#4ba3ff;--green:#48d597;--amber:#ffbf5f;--red:#ff7185}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 20% 0,#17365c 0,#07111f 45%);color:var(--text);font-family:Inter,system-ui,-apple-system,"Noto Sans JP",sans-serif}
+    header,main{max-width:1180px;margin:auto;padding:28px} header{display:flex;justify-content:space-between;gap:20px;align-items:center}
+    h1{font-size:clamp(28px,5vw,52px);margin:0;letter-spacing:-.04em}.eyebrow{color:var(--green);font-weight:800;text-transform:uppercase;letter-spacing:.12em;font-size:12px}
+    .badge{border:1px solid var(--line);background:#0b1728;padding:9px 12px;border-radius:999px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.panel{background:rgba(15,29,48,.92);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.22)}
+    .panel h2{margin:0 0 14px;font-size:19px}.row{display:flex;gap:10px;flex-wrap:wrap}.field{display:grid;gap:7px;flex:1;min-width:180px}label{font-size:12px;color:var(--muted);font-weight:700}
+    input,textarea,select{width:100%;border:1px solid var(--line);background:#081525;color:var(--text);border-radius:12px;padding:12px;font:inherit}textarea{min-height:92px;resize:vertical}
+    button{border:0;border-radius:12px;padding:12px 16px;font-weight:850;cursor:pointer;background:var(--blue);color:#05101d}button.secondary{background:#1b2c44;color:var(--text);border:1px solid var(--line)}button.green{background:var(--green)}button:disabled{opacity:.45;cursor:not-allowed}
+    .notice{margin-top:14px;border-left:4px solid var(--amber);background:#2b2213;padding:12px 14px;border-radius:8px;color:#ffe0a8;font-size:13px;line-height:1.55}.status{font-size:13px;color:var(--muted);min-height:22px;margin-top:10px}.ok{color:var(--green)}.error{color:var(--red)}
+    .product{display:grid;grid-template-columns:150px 1fr;gap:18px}.product img{width:150px;height:150px;object-fit:contain;background:white;border-radius:16px}.price{font-size:32px;font-weight:900}.meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chip{font-size:12px;padding:6px 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:11px 8px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted)}
+    .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.flow div{padding:12px;border-radius:12px;background:#0a1626;border:1px solid var(--line);font-size:12px;text-align:center}.flow b{display:block;color:var(--blue);margin-bottom:4px}
+    @media(max-width:800px){.grid{grid-template-columns:1fr}.product{grid-template-columns:1fr}.product img{width:100%;height:220px}.flow{grid-template-columns:1fr 1fr}header{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<header><div><div class="eyebrow">API-first marketplace operations</div><h1>Amazon → Shopee / Qoo10</h1><p style="color:var(--muted);max-width:720px">ASINを指定して商品情報を取得し、権利確認済みの素材だけを出品。価格と販売可否を安全な頻度で同期します。</p></div><div class="badge" id="mode">接続確認中</div></header>
+<main>
+  <div class="grid">
+    <section class="panel"><h2>1. Amazon商品を取得</h2><div class="row"><div class="field"><label>ASIN</label><input id="asin" value="B0DEMO1234" maxlength="10" /></div><div style="align-self:end"><button id="fetch">取得する</button></div></div><div class="status" id="fetchStatus"></div><div id="product"></div></section>
+    <section class="panel"><h2>同期ポリシー</h2><div class="flow"><div><b>Catalog</b>詳細・画像・属性</div><div><b>Pricing</b>最安候補・Featured Offer</div><div><b>Safety</b>キャッシュ・レート制御</div><div><b>Channels</b>価格・販売数更新</div></div><div class="notice">Amazonの一般向け正確な在庫個数はAPIで取得できません。オファー有無を販売可否として扱い、出品在庫は安全在庫数に制限します。</div></section>
+    <section class="panel"><h2>2. 出品設定</h2><div class="row"><div class="field"><label>Shopee category_id</label><input id="shopeeCategory" type="number" placeholder="必須" /></div><div class="field"><label>Qoo10 小カテゴリ</label><input id="qoo10Category" placeholder="必須" /></div><div class="field"><label>Qoo10 送料番号</label><input id="shippingNo" type="number" placeholder="必須" /></div></div><div class="row" style="margin-top:12px"><label class="chip"><input id="chShopee" type="checkbox" checked style="width:auto"> Shopee</label><label class="chip"><input id="chQoo10" type="checkbox" checked style="width:auto"> Qoo10</label></div><div class="field" style="margin-top:12px"><label>独自の商品説明（推奨）</label><textarea id="description" placeholder="自社で権利を持つ説明文を入力"></textarea></div><label style="display:flex;gap:9px;align-items:flex-start;margin:14px 0;color:var(--text)"><input id="rights" type="checkbox" style="width:auto;margin-top:3px">画像・商品名・説明文を各モールで利用する権利を保有し、各社の出品規約を確認しました。</label><div class="row"><button class="green" id="list">選択モールへ出品</button><button class="secondary" id="sync">今すぐ同期</button></div><div class="status" id="listStatus"></div></section>
+    <section class="panel"><h2>出品・同期履歴</h2><div style="overflow:auto"><table><thead><tr><th>Channel</th><th>SKU</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody id="listings"></tbody></table></div></section>
+  </div>
+</main>
+<script>
+const API_BASE = "";
+const $ = id => document.getElementById(id);
+let current = null; let demo = false;
+async function api(path, options={}) { const r = await fetch(`${API_BASE}${path}`, {headers:{"Content-Type":"application/json"},...options}); if(!r.ok) throw new Error((await r.json()).detail || r.statusText); return r.json(); }
+function demoProduct(asin){return {asin,title:`デモ商品 ${asin}`,brand:"Demo Brand",price:3980,currency:"JPY",available:true,images:["https://placehold.co/800x800/png?text=Demo+Product"],source:"pages-demo",availability_note:"Public demo: backend API URL is not configured."};}
+function renderProduct(p){current=p;$("product").innerHTML=`<div class="product" style="margin-top:18px"><img src="${p.images?.[0]||'https://placehold.co/800x800?text=No+Image'}"><div><div class="eyebrow">${p.source}</div><h2 style="font-size:25px;margin:6px 0">${p.title}</h2><div class="price">${p.price?new Intl.NumberFormat('ja-JP',{style:'currency',currency:p.currency||'JPY'}).format(p.price):'価格なし'}</div><div class="meta"><span class="chip">ASIN ${p.asin}</span><span class="chip">${p.available?'販売可能':'販売不可'}</span><span class="chip">${p.brand||'Brand unknown'}</span></div><p style="color:var(--muted);font-size:12px">${p.availability_note||''}</p></div></div>`;}
+async function health(){try{const h=await api('/api/health');$("mode").textContent=`${h.mode} / ${h.amazon_source}`;demo=false;await loadListings();}catch{demo=true;$("mode").textContent="Cloudflare Pages デモ";$("mode").classList.add('ok');}}
+$("fetch").onclick=async()=>{const asin=$("asin").value.trim().toUpperCase();$("fetchStatus").textContent="取得中…";try{const p=demo?demoProduct(asin):await api(`/api/products/${asin}/fetch`,{method:'POST'});renderProduct(p);$("fetchStatus").textContent="取得しました";$("fetchStatus").className="status ok";}catch(e){$("fetchStatus").textContent=e.message;$("fetchStatus").className="status error";}};
+$("list").onclick=async()=>{if(!current){$("listStatus").textContent="先に商品を取得してください";return}const channels=[];if($("chShopee").checked)channels.push('shopee');if($("chQoo10").checked)channels.push('qoo10');const body={asin:current.asin,channels,rights_confirmed:$("rights").checked,description:$("description").value||null,shopee_category_id:Number($("shopeeCategory").value)||null,qoo10_category_id:$("qoo10Category").value||null,shipping_no:Number($("shippingNo").value)||null};try{if(demo){if(!body.rights_confirmed)throw new Error('権利確認が必要です');$("listStatus").textContent="デモ出品を作成しました（本番APIは未接続）";}else{await api('/api/listings',{method:'POST',body:JSON.stringify(body)});$("listStatus").textContent="出品処理が完了しました";await loadListings()}$("listStatus").className="status ok";}catch(e){$("listStatus").textContent=e.message;$("listStatus").className="status error";}};
+$("sync").onclick=async()=>{try{if(!demo)await api('/api/sync/run',{method:'POST'});$("listStatus").textContent=demo?'デモ同期を実行しました':'同期が完了しました';$("listStatus").className="status ok";await loadListings()}catch(e){$("listStatus").textContent=e.message;$("listStatus").className="status error";}};
+async function loadListings(){if(demo)return;const rows=await api('/api/listings');$("listings").innerHTML=rows.map(x=>`<tr><td>${x.channel}</td><td>${x.seller_sku}</td><td>¥${x.target_price}</td><td>${x.target_stock}</td><td>${x.status}</td></tr>`).join('');}
+health();
+</script>
+</body></html>
