@@ -1,0 +1,21 @@
+name: Production URL Health
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  http-200:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Cloudflare Pages returns HTTP 200
+        run: |
+          code=$(curl -L --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 -sS -o page.html -w '%{http_code}' https://amazon-marketplace-sync-hub.pages.dev/)
+          echo "HTTP status: $code"
+          test "$code" = "200"
+          grep -q "Amazon Marketplace Sync Hub" page.html
+      - name: Upload fetched page
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-page-health
+          path: page.html
+          if-no-files-found: error
