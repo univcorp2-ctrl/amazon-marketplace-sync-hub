@@ -28,14 +28,6 @@ jobs:
       SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
       SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
       SHOPEE_ACCESS_TOKEN: ${{ secrets.SHOPEE_ACCESS_TOKEN }}
-      SHOPEE_DEFAULT_CATEGORY_ID: ${{ vars.SHOPEE_DEFAULT_CATEGORY_ID }}
-      SHOPEE_LOGISTIC_INFO: ${{ vars.SHOPEE_LOGISTIC_INFO }}
-      QOO10_API_KEY: ${{ secrets.QOO10_API_KEY }}
-      QOO10_USER_ID: ${{ secrets.QOO10_USER_ID }}
-      QOO10_PASSWORD: ${{ secrets.QOO10_PASSWORD }}
-      QOO10_DEFAULT_CATEGORY_ID: ${{ vars.QOO10_DEFAULT_CATEGORY_ID }}
-      QOO10_SHIPPING_NO: ${{ vars.QOO10_SHIPPING_NO }}
-      QOO10_CONTACT_TEL: ${{ vars.QOO10_CONTACT_TEL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,22 +44,45 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
-          from app.config import Settings
+          def present(name: str) -> bool:
+              return bool(os.environ.get(name, "").strip())
 
-          readiness = Settings().live_readiness()
-          required = ("runtime_live", "amazon_configured", "shopee_configured")
-          missing = [name for name in required if not readiness[name]]
+          def positive_integer(name: str) -> bool:
+              raw = os.environ.get(name, "").strip()
+              try:
+                  return int(raw) > 0
+              except ValueError:
+                  return False
+
+          readiness = {
+              "amazon_configured": all(
+                  present(name)
+                  for name in (
+                      "AMAZON_LWA_CLIENT_ID",
+                      "AMAZON_LWA_CLIENT_SECRET",
+                      "AMAZON_REFRESH_TOKEN",
+                  )
+              ),
+              "shopee_configured": (
+                  positive_integer("SHOPEE_PARTNER_ID")
+                  and present("SHOPEE_PARTNER_KEY")
+                  and positive_integer("SHOPEE_SHOP_ID")
+                  and present("SHOPEE_ACCESS_TOKEN")
+              ),
+          }
+          missing = [name for name, ready in readiness.items() if not ready]
+          diagnostic = {
+              "stage": "configuration",
+              "missing_readiness_gates": missing,
+          }
+          Path("sync-result.json").write_text(
+              json.dumps(diagnostic, indent=2), encoding="utf-8"
+          )
           if missing:
               message = "Missing production readiness gates: " + ", ".join(missing)
-              Path("sync-result.json").write_text(
-                  json.dumps(
-                      {"stage": "configuration", "missing_readiness_gates": missing},
-                      indent=2,
-                  ),
-                  encoding="utf-8",
-              )
               print(f"::error title=Production readiness failed::{message}")
               raise SystemExit(message)
           print("Amazon and Shopee live integration settings are present.")
@@ -99,7 +114,9 @@ jobs:
           PY
 
       - name: Run synchronized price and availability update
-        run: python -m app.cli sync | tee sync-result.json
+        run: |
+          set -o pipefail
+          python -m app.cli sync | tee sync-result.json
 
       - name: Validate synchronization result
         run: |
