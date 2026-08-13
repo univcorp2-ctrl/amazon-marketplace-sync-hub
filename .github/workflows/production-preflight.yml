@@ -1,0 +1,49 @@
+name: Production Preflight
+on:
+  workflow_dispatch:
+    inputs:
+      asin:
+        description: Optional ASIN to verify Catalog Items and Product Pricing permissions
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      APP_MODE: production
+      API_LIVE_ENABLED: "true"
+      ENABLED_CHANNELS: shopee
+      DATABASE_URL: sqlite:///./data/preflight.db
+      CORS_ORIGINS: https://marketplace-sync-ops.pages.dev
+      AMAZON_LWA_CLIENT_ID: ${{ secrets.AMAZON_LWA_CLIENT_ID }}
+      AMAZON_LWA_CLIENT_SECRET: ${{ secrets.AMAZON_LWA_CLIENT_SECRET }}
+      AMAZON_REFRESH_TOKEN: ${{ secrets.AMAZON_REFRESH_TOKEN }}
+      SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID || '0' }}
+      SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
+      SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID || '0' }}
+      SHOPEE_ACCESS_TOKEN: ${{ secrets.SHOPEE_ACCESS_TOKEN }}
+      PREFLIGHT_ASIN: ${{ inputs.asin }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install .
+      - name: Verify Amazon LWA and Shopee shop authorization
+        shell: bash
+        run: |
+          set -o pipefail
+          args=(preflight --channels amazon shopee)
+          if [[ -n "$PREFLIGHT_ASIN" ]]; then args+=(--asin "$PREFLIGHT_ASIN"); fi
+          market-sync "${args[@]}" | tee preflight-result.json
+      - name: Upload sanitized preflight result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-preflight-${{ github.run_id }}
+          path: preflight-result.json
+          retention-days: 7
+          if-no-files-found: warn

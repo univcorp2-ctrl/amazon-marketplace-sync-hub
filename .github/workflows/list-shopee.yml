@@ -1,0 +1,125 @@
+name: List Product on Shopee
+on:
+  workflow_dispatch:
+    inputs:
+      asin:
+        description: Amazon ASIN used only for price and availability lookup
+        required: true
+        type: string
+      title:
+        description: Seller-owned Shopee product title
+        required: true
+        type: string
+      description:
+        description: Seller-owned Shopee product description
+        required: true
+        type: string
+      image_urls:
+        description: Seller-owned HTTPS image URLs, comma or newline separated
+        required: true
+        type: string
+      category_id:
+        description: Shopee category_id
+        required: true
+        type: string
+      seller_sku:
+        description: Optional seller SKU; defaults to AMZ-ASIN
+        required: false
+        type: string
+      price_override:
+        description: Optional final target-currency price
+        required: false
+        type: string
+      stock_override:
+        description: Initial stock; start with 1
+        required: true
+        default: "1"
+        type: string
+      shopee_attributes:
+        description: Optional JSON array for category attributes
+        required: false
+        type: string
+      rights_confirmed:
+        description: Confirm rights, marketplace policy, brand approval, prohibited-goods and shipping checks
+        required: true
+        default: false
+        type: boolean
+      force_relist:
+        description: Explicitly allow another API listing for an existing SKU
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: marketplace-production-writes
+  cancel-in-progress: false
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    env:
+      APP_MODE: production
+      API_LIVE_ENABLED: "true"
+      ENABLED_CHANNELS: shopee
+      DATABASE_URL: sqlite:///./data/app.db
+      CORS_ORIGINS: https://marketplace-sync-ops.pages.dev
+      AMAZON_LWA_CLIENT_ID: ${{ secrets.AMAZON_LWA_CLIENT_ID }}
+      AMAZON_LWA_CLIENT_SECRET: ${{ secrets.AMAZON_LWA_CLIENT_SECRET }}
+      AMAZON_REFRESH_TOKEN: ${{ secrets.AMAZON_REFRESH_TOKEN }}
+      SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID || '0' }}
+      SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
+      SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID || '0' }}
+      SHOPEE_ACCESS_TOKEN: ${{ secrets.SHOPEE_ACCESS_TOKEN }}
+      SHOPEE_DEFAULT_CATEGORY_ID: ${{ vars.SHOPEE_DEFAULT_CATEGORY_ID || '0' }}
+      SHOPEE_LOGISTIC_INFO: ${{ vars.SHOPEE_LOGISTIC_INFO || '[]' }}
+      IMAGE_HOST_ALLOWLIST: ${{ vars.IMAGE_HOST_ALLOWLIST }}
+      TARGET_CURRENCY: ${{ vars.TARGET_CURRENCY || 'JPY' }}
+      SOURCE_TO_TARGET_FX_RATE: ${{ vars.SOURCE_TO_TARGET_FX_RATE || '1.0' }}
+      MARKETPLACE_FEE_RATE: ${{ vars.MARKETPLACE_FEE_RATE || '0.0' }}
+      SHIPPING_COST: ${{ vars.SHIPPING_COST || '0' }}
+      LISTING_ASIN: ${{ inputs.asin }}
+      LISTING_TITLE: ${{ inputs.title }}
+      LISTING_DESCRIPTION: ${{ inputs.description }}
+      LISTING_IMAGE_URLS: ${{ inputs.image_urls }}
+      SHOPEE_CATEGORY_ID: ${{ inputs.category_id }}
+      SELLER_SKU: ${{ inputs.seller_sku }}
+      PRICE_OVERRIDE: ${{ inputs.price_override }}
+      STOCK_OVERRIDE: ${{ inputs.stock_override }}
+      SHOPEE_ATTRIBUTES: ${{ inputs.shopee_attributes }}
+      RIGHTS_CONFIRMED: ${{ inputs.rights_confirmed }}
+      FORCE_RELIST: ${{ inputs.force_relist }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Restore non-secret listing database
+        uses: actions/cache/restore@v4
+        with:
+          path: data/
+          key: marketplace-db-${{ github.run_id }}
+          restore-keys: |
+            marketplace-db-
+      - run: pip install .
+      - run: mkdir -p data
+      - name: Create live Shopee listing
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/workflow_list.py | tee listing-result.json
+      - name: Save non-secret listing database
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: marketplace-db-${{ github.run_id }}
+      - name: Upload listing result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopee-listing-result-${{ github.run_id }}
+          path: listing-result.json
+          retention-days: 30
+          if-no-files-found: warn

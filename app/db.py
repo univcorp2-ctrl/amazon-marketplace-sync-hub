@@ -19,8 +19,9 @@ class Database:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, check_same_thread=False)
+        connection = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=30000")
         return connection
 
     def _init_schema(self) -> None:
@@ -60,44 +61,130 @@ class Database:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """INSERT INTO products(asin, payload, fetched_at) VALUES(?, ?, ?)
-                ON CONFLICT(asin) DO UPDATE SET payload=excluded.payload, fetched_at=excluded.fetched_at""",
+                ON CONFLICT(asin) DO UPDATE SET payload=excluded.payload,
+                fetched_at=excluded.fetched_at""",
                 (product.asin, product.model_dump_json(), product.fetched_at),
             )
 
     def get_product(self, asin: str) -> ProductRecord | None:
         with self._lock, self._connect() as connection:
-            row = connection.execute("SELECT payload FROM products WHERE asin=?", (asin,)).fetchone()
+            row = connection.execute(
+                "SELECT payload FROM products WHERE asin=?", (asin,)
+            ).fetchone()
         return ProductRecord.model_validate_json(row["payload"]) if row else None
 
     def list_products(self) -> list[ProductRecord]:
         with self._lock, self._connect() as connection:
-            rows = connection.execute("SELECT payload FROM products ORDER BY fetched_at DESC").fetchall()
+            rows = connection.execute(
+                "SELECT payload FROM products ORDER BY fetched_at DESC"
+            ).fetchall()
         return [ProductRecord.model_validate_json(row["payload"]) for row in rows]
 
-    def upsert_listing(self, *, asin: str, channel: str, seller_sku: str, external_id: str | None, status: str, target_price: int, target_stock: int, payload: dict[str, Any]) -> None:
+    def get_listing(self, channel: str, seller_sku: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM listings WHERE channel=? AND seller_sku=?",
+                (channel, seller_sku),
+            ).fetchone()
+        return self._listing_row(row) if row else None
+
+    def reserve_listings(
+        self,
+        *,
+        asin: str,
+        channels: list[str],
+        seller_sku: str,
+        force: bool,
+    ) -> list[str]:
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" for _ in channels)
+            rows = connection.execute(
+                f"SELECT channel FROM listings WHERE seller_sku=? AND channel IN ({placeholders})",
+                (seller_sku, *channels),
+            ).fetchall()
+            conflicts = [str(row["channel"]) for row in rows]
+            if conflicts and not force:
+                return conflicts
+
+            timestamp = utc_now_iso()
+            for channel in channels:
+                connection.execute(
+                    """INSERT INTO listings(
+                        asin, channel, seller_sku, external_id, status,
+                        target_price, target_stock, payload, updated_at
+                    ) VALUES(?, ?, ?, NULL, 'creating', NULL, NULL, '{}', ?)
+                    ON CONFLICT(channel, seller_sku) DO UPDATE SET
+                        asin=excluded.asin,
+                        status='creating',
+                        updated_at=excluded.updated_at""",
+                    (asin, channel, seller_sku, timestamp),
+                )
+        return []
+
+    def upsert_listing(
+        self,
+        *,
+        asin: str,
+        channel: str,
+        seller_sku: str,
+        external_id: str | None,
+        status: str,
+        target_price: int,
+        target_stock: int,
+        payload: dict[str, Any],
+    ) -> None:
         with self._lock, self._connect() as connection:
             connection.execute(
-                """INSERT INTO listings(asin, channel, seller_sku, external_id, status, target_price, target_stock, payload, updated_at)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(channel, seller_sku) DO UPDATE SET asin=excluded.asin, external_id=COALESCE(excluded.external_id, listings.external_id), status=excluded.status, target_price=excluded.target_price, target_stock=excluded.target_stock, payload=excluded.payload, updated_at=excluded.updated_at""",
-                (asin, channel, seller_sku, external_id, status, target_price, target_stock, json.dumps(payload, ensure_ascii=False), utc_now_iso()),
+                """INSERT INTO listings(
+                    asin, channel, seller_sku, external_id, status,
+                    target_price, target_stock, payload, updated_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, seller_sku) DO UPDATE SET
+                    asin=excluded.asin,
+                    external_id=COALESCE(excluded.external_id, listings.external_id),
+                    status=excluded.status,
+                    target_price=excluded.target_price,
+                    target_stock=excluded.target_stock,
+                    payload=excluded.payload,
+                    updated_at=excluded.updated_at""",
+                (
+                    asin,
+                    channel,
+                    seller_sku,
+                    external_id,
+                    status,
+                    target_price,
+                    target_stock,
+                    json.dumps(payload, ensure_ascii=False),
+                    utc_now_iso(),
+                ),
             )
 
     def list_listings(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
-            rows = connection.execute("SELECT * FROM listings ORDER BY updated_at DESC").fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            item["payload"] = json.loads(item["payload"])
-            result.append(item)
-        return result
+            rows = connection.execute(
+                "SELECT * FROM listings ORDER BY updated_at DESC"
+            ).fetchall()
+        return [self._listing_row(row) for row in rows]
+
+    @staticmethod
+    def _listing_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["payload"] = json.loads(item["payload"])
+        return item
 
     def start_sync(self) -> int:
         with self._lock, self._connect() as connection:
-            cursor = connection.execute("INSERT INTO sync_runs(started_at, status, detail) VALUES(?, 'running', '{}')", (utc_now_iso(),))
+            cursor = connection.execute(
+                "INSERT INTO sync_runs(started_at, status, detail) VALUES(?, 'running', '{}')",
+                (utc_now_iso(),),
+            )
             return int(cursor.lastrowid)
 
     def finish_sync(self, run_id: int, status: str, detail: dict[str, Any]) -> None:
         with self._lock, self._connect() as connection:
-            connection.execute("UPDATE sync_runs SET finished_at=?, status=?, detail=? WHERE id=?", (utc_now_iso(), status, json.dumps(detail, ensure_ascii=False), run_id))
+            connection.execute(
+                "UPDATE sync_runs SET finished_at=?, status=?, detail=? WHERE id=?",
+                (utc_now_iso(), status, json.dumps(detail, ensure_ascii=False), run_id),
+            )

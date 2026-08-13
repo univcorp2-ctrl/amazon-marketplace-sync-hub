@@ -1,6 +1,12 @@
 # Production readiness
 
-The public Cloudflare Pages site is a static control-plane/demo build. Live Amazon SP-API access and Shopee listing operations run only from the FastAPI backend.
+The public Cloudflare Pages site is a static control-plane/demo build. Live Amazon SP-API access and Shopee listing operations run only from the FastAPI backend or the explicitly dispatched GitHub Actions workflows.
+
+## Production endpoint
+
+- Static control-plane: `https://marketplace-sync-ops.pages.dev`
+- The legacy branded Pages hostname is not used because browser safe-browsing currently blocks it with a dangerous-site warning.
+- The Pages bundle contains no marketplace credentials and cannot execute Amazon or Shopee API calls without a separately hosted, authenticated FastAPI backend.
 
 ## Production endpoint
 
@@ -10,29 +16,42 @@ The public Cloudflare Pages site is a static control-plane/demo build. Live Amaz
 
 ## Required production gates
 
-A backend is considered ready for live Shopee listing only when `GET /api/health` reports `ready_for_live_listing: true`. The check requires:
+A backend is configuration-ready when `GET /api/health` reports `status: ready` and `missing_config: []`. The check requires:
 
 - `APP_MODE=production` and `API_LIVE_ENABLED=true`
-- `API_ADMIN_KEY` with at least 32 characters
+- `APP_API_TOKEN` stored in the deployment secret store
 - a restricted `CORS_ORIGINS` value rather than `*`
 - Amazon LWA client ID, client secret, refresh token, and marketplace ID
-- Shopee partner ID, partner key, shop ID, and access token
-- a valid Shopee category ID and logistics configuration
-- the rights-confirmation gate enabled
+- Shopee partner ID, partner key, shop ID, and either an access token or refresh token
 
-All catalog, listing, and sync endpoints require the `X-Admin-Key` header in production. The health endpoint never returns secret values.
+All catalog, listing, preflight, and sync endpoints require `Authorization: Bearer <APP_API_TOKEN>` or `X-API-Key` in production. The health endpoint returns only configuration names, never secret values.
+
+A live listing additionally requires:
+
+- a valid Shopee category ID and category-specific attributes
+- `SHOPEE_LOGISTIC_INFO`
+- a seller-controlled `IMAGE_HOST_ALLOWLIST`
+- seller-owned title, description, and HTTPS image URLs
+- `rights_confirmed=true`
+- an explicit target currency, FX rate when currencies differ, fees, shipping cost, and initial stock
 
 ## Scheduled synchronization
 
 The `Marketplace Sync` workflow is fail-closed:
 
-- scheduled runs execute only when the repository variable `MARKETPLACE_SYNC_ENABLED` is exactly `true`
-- manual workflow dispatch remains available for validation
-- the SQLite database is restored and saved through an Actions cache
-- a run fails when Amazon/Shopee configuration is absent, when no persisted listing exists, when any listing update errors, or when zero listings are updated
-- overlapping sync runs are prevented
+- scheduled runs execute only when repository variable `MARKETPLACE_SYNC_ENABLED` is exactly `true`
+- manual workflow dispatch remains available for controlled validation
+- the non-secret SQLite listing database is restored and saved through an Actions cache
+- the workflow exits nonzero when required production configuration is absent, when no persisted listing exists, when any update fails, or when zero listings are updated
+- listing and sync workflows share one concurrency group to prevent overlapping marketplace writes
 
-Do not enable the schedule until a rights-confirmed listing has been created, its external Shopee item ID has been verified, and the database has been placed in persistent storage.
+Do not set `MARKETPLACE_SYNC_ENABLED=true` until a rights-confirmed listing has been created, its external Shopee item ID has been verified, and the cached or backend database contains that listing.
+
+## Shopee credential lifecycle
+
+The connector supports Shopee access-token refresh and atomically saves the rotated access and refresh token to `SHOPEE_TOKEN_STATE_FILE`. Use this only on a private, durable backend volume such as `/app/secrets/shopee-token-state.json`.
+
+GitHub-hosted runners do not provide a durable private token-state volume. Actions therefore use `SHOPEE_ACCESS_TOKEN` from repository secrets for controlled runs. Never put a Shopee refresh token or token-state file in the repository, Pages bundle, Actions artifact, or Actions cache.
 
 ## Shopee credential lifecycle
 
@@ -44,6 +63,6 @@ Before enabling continuous synchronization, run the FastAPI service on a backend
 
 - Amazon SP-API does not expose exact retail stock quantity. The implementation treats offer availability as sellable/not sellable and publishes only the configured safety quantity.
 - Product images, descriptions, and brand assets must be independently licensed for reuse outside Amazon. `rights_confirmed=true` is a technical gate, not proof of permission.
-- Shopee category attributes, logistics, restricted-item rules, local currency conversion, fees, taxes, and shipping cost must be validated for the destination shop before listing.
-- Mount persistent storage for SQLite or replace it with a managed database. An ephemeral CI workspace is not a production database.
-- Store all credentials in the deployment platform's secret store. Never commit them to GitHub or embed them in the public Pages bundle.
+- Shopee category attributes, logistics, restricted-item rules, local currency conversion, fees, taxes, shipping, returns, and delivery time must be validated for the destination shop before listing.
+- The Actions cache stores non-secret listing state but is not a transactional production database. For continuous operation, run FastAPI with persistent storage or replace SQLite with a managed database.
+- Start with one authorized product and stock 1, then verify listing, order, cancellation, refund, and source-offer disappearance before enabling scheduled synchronization.

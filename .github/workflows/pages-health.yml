@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Verify Cloudflare Pages returns HTTP 200
         run: |
-          code=$(curl -L --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 -sS -o page.html -w '%{http_code}' https://amazon-marketplace-sync-hub.pages.dev/)
+          code=$(curl -L --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 -sS -o page.html -w '%{http_code}' https://marketplace-sync-ops.pages.dev/)
           echo "HTTP status: $code"
           test "$code" = "200"
           grep -q "Amazon Marketplace Sync Hub" page.html

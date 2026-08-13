@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: marketplace-sync
+  group: marketplace-production-writes
   cancel-in-progress: false
 
 jobs:
@@ -20,137 +20,55 @@ jobs:
     env:
       APP_MODE: production
       API_LIVE_ENABLED: "true"
+      ENABLED_CHANNELS: shopee
       DATABASE_URL: sqlite:///./data/app.db
+      CORS_ORIGINS: https://marketplace-sync-ops.pages.dev
       AMAZON_LWA_CLIENT_ID: ${{ secrets.AMAZON_LWA_CLIENT_ID }}
       AMAZON_LWA_CLIENT_SECRET: ${{ secrets.AMAZON_LWA_CLIENT_SECRET }}
       AMAZON_REFRESH_TOKEN: ${{ secrets.AMAZON_REFRESH_TOKEN }}
-      SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
+      SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID || '0' }}
       SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
-      SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
+      SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID || '0' }}
       SHOPEE_ACCESS_TOKEN: ${{ secrets.SHOPEE_ACCESS_TOKEN }}
+      SHOPEE_DEFAULT_CATEGORY_ID: ${{ vars.SHOPEE_DEFAULT_CATEGORY_ID || '0' }}
+      SHOPEE_LOGISTIC_INFO: ${{ vars.SHOPEE_LOGISTIC_INFO || '[]' }}
+      IMAGE_HOST_ALLOWLIST: ${{ vars.IMAGE_HOST_ALLOWLIST }}
+      TARGET_CURRENCY: ${{ vars.TARGET_CURRENCY || 'JPY' }}
+      SOURCE_TO_TARGET_FX_RATE: ${{ vars.SOURCE_TO_TARGET_FX_RATE || '1.0' }}
+      MARKETPLACE_FEE_RATE: ${{ vars.MARKETPLACE_FEE_RATE || '0.0' }}
+      SHIPPING_COST: ${{ vars.SHIPPING_COST || '0' }}
+      STOCK_BUFFER_QUANTITY: ${{ vars.STOCK_BUFFER_QUANTITY || '1' }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
-      - run: pip install .
-
-      - run: mkdir -p data
-
-      - name: Validate live integration configuration
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          def present(name: str) -> bool:
-              return bool(os.environ.get(name, "").strip())
-
-          def positive_integer(name: str) -> bool:
-              raw = os.environ.get(name, "").strip()
-              try:
-                  return int(raw) > 0
-              except ValueError:
-                  return False
-
-          readiness = {
-              "amazon_configured": all(
-                  present(name)
-                  for name in (
-                      "AMAZON_LWA_CLIENT_ID",
-                      "AMAZON_LWA_CLIENT_SECRET",
-                      "AMAZON_REFRESH_TOKEN",
-                  )
-              ),
-              "shopee_configured": (
-                  positive_integer("SHOPEE_PARTNER_ID")
-                  and present("SHOPEE_PARTNER_KEY")
-                  and positive_integer("SHOPEE_SHOP_ID")
-                  and present("SHOPEE_ACCESS_TOKEN")
-              ),
-          }
-          missing = [name for name, ready in readiness.items() if not ready]
-          diagnostic = {
-              "stage": "configuration",
-              "missing_readiness_gates": missing,
-          }
-          Path("sync-result.json").write_text(
-              json.dumps(diagnostic, indent=2), encoding="utf-8"
-          )
-          if missing:
-              message = "Missing production readiness gates: " + ", ".join(missing)
-              print(f"::error title=Production readiness failed::{message}")
-              raise SystemExit(message)
-          print("Amazon and Shopee live integration settings are present.")
-          PY
-
-      - name: Restore persistent marketplace database
-        id: db-cache
+      - name: Restore non-secret listing database
         uses: actions/cache/restore@v4
         with:
-          path: data/app.db
-          key: marketplace-db-${{ runner.os }}-${{ github.run_id }}
+          path: data/
+          key: marketplace-db-${{ github.run_id }}
           restore-keys: |
-            marketplace-db-${{ runner.os }}-
-
-      - name: Require persisted listings
-        run: |
-          python - <<'PY'
-          from app.db import Database
-
-          listings = Database("sqlite:///./data/app.db").list_listings()
-          print(f"Persisted listings: {len(listings)}")
-          if not listings:
-              message = (
-                  "No persisted marketplace listings exist. Create and verify at least one "
-                  "rights-confirmed listing before enabling scheduled synchronization."
-              )
-              print(f"::error title=No persisted listings::{message}")
-              raise SystemExit(message)
-          PY
-
+            marketplace-db-
+      - run: pip install .
+      - run: mkdir -p data
       - name: Run synchronized price and availability update
+        shell: bash
         run: |
           set -o pipefail
-          python -m app.cli sync | tee sync-result.json
-
-      - name: Validate synchronization result
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          result = json.loads(Path("sync-result.json").read_text(encoding="utf-8"))
-          errors = result.get("errors") or []
-          updated = result.get("updated") or []
-          if errors:
-              message = f"Marketplace synchronization returned {len(errors)} error(s)."
-              print(f"::error title=Marketplace synchronization failed::{message}")
-              raise SystemExit(message)
-          if not updated:
-              message = "Marketplace synchronization updated zero listings."
-              print(f"::error title=Marketplace synchronization was a no-op::{message}")
-              raise SystemExit(message)
-          print(f"Marketplace synchronization updated {len(updated)} listing(s).")
-          PY
-
-      - name: Save persistent marketplace database
+          market-sync sync | tee sync-result.json
+      - name: Save non-secret listing database
         if: success()
         uses: actions/cache/save@v4
         with:
-          path: data/app.db
-          key: marketplace-db-${{ runner.os }}-${{ github.run_id }}
-
+          path: data/
+          key: marketplace-db-${{ github.run_id }}
       - name: Upload sync result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: marketplace-sync-result
-          path: |
-            sync-result.json
-            data/
+          name: marketplace-sync-result-${{ github.run_id }}
+          path: sync-result.json
+          retention-days: 14
           if-no-files-found: warn

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -16,7 +16,7 @@ from app.connectors.qoo10 import Qoo10Client
 from app.connectors.shopee import ShopeeClient
 from app.db import Database
 from app.models import ListingRequest
-from app.services import CatalogService, MarketplaceService
+from app.services import CatalogService, DuplicateListingError, MarketplaceService
 
 
 class Container:
@@ -42,6 +42,23 @@ class Container:
         await self.qoo10.close()
 
 
+async def run_preflight(
+    container: Container, settings: Settings, asin: str | None = None
+) -> dict[str, Any]:
+    issues = settings.production_configuration_issues(include_api_token=False)
+    result: dict[str, Any] = {
+        "status": "ready" if not issues else "blocked",
+        "missing_config": issues,
+        "checks": {},
+    }
+    if issues:
+        return result
+    result["checks"]["amazon"] = await container.amazon.check_connection(asin)
+    if "shopee" in settings.enabled_channels:
+        result["checks"]["shopee"] = await container.shopee.check_connection()
+    return result
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     selected = settings or get_settings()
     container = Container(selected)
@@ -55,71 +72,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         await container.close()
 
-    app = FastAPI(title=selected.app_name, version="0.2.0", lifespan=lifespan)
+    docs_url = "/docs" if not selected.is_production or selected.enable_docs else None
+    app = FastAPI(
+        title=selected.app_name,
+        version="0.2.0",
+        lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=None,
+    )
     app.state.container = container
     app.add_middleware(
         CORSMiddleware,
         allow_origins=selected.cors_origins,
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     )
 
-    async def require_admin(
-        x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    async def require_api_access(
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None),
     ) -> None:
-        if selected.app_mode != "production":
+        if not selected.is_production:
             return
-        if not selected.api_admin_key:
+        if len(selected.app_api_token) < 32:
             raise HTTPException(
-                status_code=503,
-                detail="Production API is unavailable until API_ADMIN_KEY is configured",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="APP_API_TOKEN must contain at least 32 characters",
             )
-        if x_admin_key is None or not secrets.compare_digest(
-            x_admin_key, selected.api_admin_key
-        ):
-            raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Key")
-
-    protected = [Depends(require_admin)]
+        bearer = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            bearer = authorization[7:].strip()
+        provided = x_api_key or bearer
+        if not provided or not secrets.compare_digest(provided, selected.app_api_token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="A valid API token is required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        readiness = selected.live_readiness()
+        issues = selected.production_configuration_issues(include_api_token=True)
         return {
-            "status": "ok",
+            "status": "ready" if not issues else "degraded",
             "mode": selected.app_mode,
             "live_api_enabled": selected.api_live_enabled,
-            "ready_for_live_listing": all(readiness.values()),
-            "readiness": readiness,
             "amazon_source": "SP-API",
             "exact_amazon_stock_quantity": False,
+            "enabled_channels": selected.enabled_channels,
+            "missing_config": issues,
         }
 
-    @app.post("/api/products/{asin}/fetch", dependencies=protected)
-    async def fetch_product(asin: str, force: bool = Query(default=False)) -> dict[str, Any]:
+    @app.post("/api/preflight", dependencies=[Depends(require_api_access)])
+    async def preflight(asin: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            return await run_preflight(container, selected, asin)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/products/{asin}/fetch", dependencies=[Depends(require_api_access)]
+    )
+    async def fetch_product(
+        asin: str, force: bool = Query(default=False)
+    ) -> dict[str, Any]:
         try:
             return (await container.catalog.fetch(asin, force=force)).model_dump()
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/products", dependencies=protected)
+    @app.get("/api/products", dependencies=[Depends(require_api_access)])
     async def products() -> list[dict[str, Any]]:
         return [item.model_dump() for item in container.db.list_products()]
 
-    @app.post("/api/listings", dependencies=protected)
+    @app.post("/api/listings", dependencies=[Depends(require_api_access)])
     async def create_listing(request: ListingRequest) -> dict[str, Any]:
         try:
             return {"results": await container.marketplaces.create_listings(request)}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except DuplicateListingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/listings", dependencies=protected)
+    @app.get("/api/listings", dependencies=[Depends(require_api_access)])
     async def listings() -> list[dict[str, Any]]:
         return container.db.list_listings()
 
-    @app.post("/api/sync/run", dependencies=protected)
+    @app.post("/api/sync/run", dependencies=[Depends(require_api_access)])
     async def sync_run() -> dict[str, Any]:
         return await container.marketplaces.sync_all()
 
