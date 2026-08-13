@@ -46,22 +46,32 @@ jobs:
 
       - run: pip install .
 
+      - run: mkdir -p data
+
       - name: Validate live integration configuration
         run: |
           python - <<'PY'
+          import json
+          from pathlib import Path
+
           from app.config import Settings
 
           readiness = Settings().live_readiness()
           required = ("runtime_live", "amazon_configured", "shopee_configured")
           missing = [name for name in required if not readiness[name]]
           if missing:
-              raise SystemExit(
-                  "Missing production readiness gates: " + ", ".join(missing)
+              message = "Missing production readiness gates: " + ", ".join(missing)
+              Path("sync-result.json").write_text(
+                  json.dumps(
+                      {"stage": "configuration", "missing_readiness_gates": missing},
+                      indent=2,
+                  ),
+                  encoding="utf-8",
               )
+              print(f"::error title=Production readiness failed::{message}")
+              raise SystemExit(message)
           print("Amazon and Shopee live integration settings are present.")
           PY
-
-      - run: mkdir -p data
 
       - name: Restore persistent marketplace database
         id: db-cache
@@ -80,10 +90,12 @@ jobs:
           listings = Database("sqlite:///./data/app.db").list_listings()
           print(f"Persisted listings: {len(listings)}")
           if not listings:
-              raise SystemExit(
+              message = (
                   "No persisted marketplace listings exist. Create and verify at least one "
                   "rights-confirmed listing before enabling scheduled synchronization."
               )
+              print(f"::error title=No persisted listings::{message}")
+              raise SystemExit(message)
           PY
 
       - name: Run synchronized price and availability update
@@ -99,9 +111,13 @@ jobs:
           errors = result.get("errors") or []
           updated = result.get("updated") or []
           if errors:
-              raise SystemExit(f"Marketplace synchronization returned {len(errors)} error(s).")
+              message = f"Marketplace synchronization returned {len(errors)} error(s)."
+              print(f"::error title=Marketplace synchronization failed::{message}")
+              raise SystemExit(message)
           if not updated:
-              raise SystemExit("Marketplace synchronization updated zero listings.")
+              message = "Marketplace synchronization updated zero listings."
+              print(f"::error title=Marketplace synchronization was a no-op::{message}")
+              raise SystemExit(message)
           print(f"Marketplace synchronization updated {len(updated)} listing(s).")
           PY
 
