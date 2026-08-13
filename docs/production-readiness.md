@@ -2,6 +2,12 @@
 
 The public Cloudflare Pages site is a static control-plane/demo build. Live Amazon SP-API access and Shopee listing operations run only from the FastAPI backend.
 
+## Production endpoint
+
+- Static control-plane: `https://marketplace-sync-ops.pages.dev`
+- The legacy branded Pages hostname is not used because Cloudflare currently serves a suspected-phishing interstitial on that hostname.
+- This Pages deployment contains no marketplace credentials and cannot execute Amazon or Shopee API calls. A separately hosted FastAPI backend is required for live operations.
+
 ## Required production gates
 
 A backend is considered ready for live Shopee listing only when `GET /api/health` reports `ready_for_live_listing: true`. The check requires:
@@ -27,6 +33,12 @@ The `Marketplace Sync` workflow is fail-closed:
 - overlapping sync runs are prevented
 
 Do not enable the schedule until a rights-confirmed listing has been created, its external Shopee item ID has been verified, and the database has been placed in persistent storage.
+
+## Shopee credential lifecycle
+
+Shopee shop access tokens are short-lived. The current connector accepts an access token from the deployment secret store, but it does not yet rotate and durably persist the replacement refresh token. A fixed `SHOPEE_ACCESS_TOKEN` therefore supports controlled validation only, not unattended 24-hour operation.
+
+Before enabling continuous synchronization, run the FastAPI service on a backend with an encrypted, durable secret store and implement atomic access-token/refresh-token rotation. Never write a Shopee refresh token to the public repository, an Actions artifact, an Actions cache, or the Pages bundle.
 
 ## Operational limits before real listings
 
