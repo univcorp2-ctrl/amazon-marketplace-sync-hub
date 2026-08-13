@@ -1,0 +1,22 @@
+{
+  "version": "2026-08-13",
+  "policy": "conservative-cross-border",
+  "notes": "High-risk baseline. Destination-market Shopee policy and local law remain authoritative. In strict automation mode both deny and review groups are blocked from automatic listing.",
+  "supported_markets": ["SG", "MY", "PH", "TH", "TW", "VN", "ID", "BR"],
+  "deny": {
+    "weapons_explosives": ["firearm", "gun", "ammunition", "bullet", "explosive", "firework", "grenade", "taser", "stun gun", "switchblade", "weapon", "銃", "拳銃", "弾薬", "爆発物", "花火", "スタンガン", "武器"],
+    "drugs_controlled": ["cocaine", "heroin", "methamphetamine", "cannabis", "marijuana", "thc", "psychedelic", "narcotic", "controlled drug", "違法薬物", "大麻", "麻薬", "覚醒剤"],
+    "tobacco_nicotine": ["cigarette", "tobacco", "vape", "e-cigarette", "nicotine", "cigar", "タバコ", "たばこ", "電子タバコ", "ニコチン"],
+    "counterfeit_illicit": ["counterfeit", "replica brand", "fake brand", "偽ブランド", "偽物", "海賊版"],
+    "adult_explicit": ["sex toy", "pornographic", "pornography", "adult toy", "アダルトグッズ", "性具", "ポルノ"]
+  },
+  "review": {
+    "alcohol": ["alcohol", "beer", "wine", "whisky", "whiskey", "vodka", "sake", "liquor", "ビール", "ワイン", "ウイスキー", "酒", "焼酎"],
+    "medical_health": ["prescription", "medicine", "pharmaceutical", "medical device", "contact lens", "supplement", "vitamin", "inhaler", "医薬品", "処方薬", "医療機器", "コンタクトレンズ", "サプリメント", "ビタミン"],
+    "hazardous_chemical": ["pesticide", "insecticide", "poison", "corrosive", "flammable", "hazardous chemical", "殺虫剤", "農薬", "毒物", "腐食性", "可燃性"],
+    "battery_aerosol_liquid": ["lithium battery", "lithium-ion", "power bank", "aerosol", "spray can", "perfume", "nail polish", "リチウム電池", "モバイルバッテリー", "スプレー缶", "香水", "マニキュア"],
+    "food_perishable": ["fresh food", "perishable", "meat", "seafood", "frozen food", "生鮮", "生肉", "魚介", "冷凍食品"],
+    "gambling_surveillance": ["gambling", "slot machine", "spy camera", "hidden camera", "wiretap", "盗聴", "隠しカメラ", "ギャンブル", "スロットマシン"],
+    "regulated_sensitive": ["radio transmitter", "laser pointer", "religious material", "political material", "無線機", "レーザーポインター", "宗教資料", "政治資料"]
+  }
+}
