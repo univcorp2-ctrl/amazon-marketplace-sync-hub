@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     app_mode: str = "demo"
     api_live_enabled: bool = False
     enable_background_sync: bool = False
+    api_admin_key: str = ""
     database_url: str = "sqlite:///./data/app.db"
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
@@ -54,6 +55,33 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [part.strip() for part in value.split(",") if part.strip()]
         return value
+
+    def live_readiness(self) -> dict[str, bool]:
+        """Return non-secret production readiness signals."""
+        amazon_configured = bool(
+            self.amazon_lwa_client_id.strip()
+            and self.amazon_lwa_client_secret.strip()
+            and self.amazon_refresh_token.strip()
+            and self.amazon_marketplace_id.strip()
+        )
+        shopee_configured = bool(
+            self.shopee_partner_id > 0
+            and self.shopee_partner_key.strip()
+            and self.shopee_shop_id > 0
+            and self.shopee_access_token.strip()
+        )
+        shopee_listing_defaults = bool(
+            self.shopee_default_category_id > 0 and self.shopee_logistic_info
+        )
+        return {
+            "runtime_live": self.app_mode == "production" and self.api_live_enabled,
+            "admin_auth": len(self.api_admin_key) >= 32,
+            "cors_restricted": bool(self.cors_origins) and "*" not in self.cors_origins,
+            "amazon_configured": amazon_configured,
+            "shopee_configured": shopee_configured,
+            "shopee_listing_defaults": shopee_listing_defaults,
+            "rights_gate_enabled": self.rights_confirmation_required,
+        }
 
 
 @lru_cache
