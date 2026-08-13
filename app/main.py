@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -48,11 +49,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if selected.enable_background_sync:
-            container.scheduler_task = asyncio.create_task(container.marketplaces.scheduler(container.stop))
+            container.scheduler_task = asyncio.create_task(
+                container.marketplaces.scheduler(container.stop)
+            )
         yield
         await container.close()
 
-    app = FastAPI(title=selected.app_name, version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title=selected.app_name, version="0.2.0", lifespan=lifespan)
     app.state.container = container
     app.add_middleware(
         CORSMiddleware,
@@ -62,28 +65,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    async def require_admin(
+        x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    ) -> None:
+        if selected.app_mode != "production":
+            return
+        if not selected.api_admin_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Production API is unavailable until API_ADMIN_KEY is configured",
+            )
+        if x_admin_key is None or not secrets.compare_digest(
+            x_admin_key, selected.api_admin_key
+        ):
+            raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Key")
+
+    protected = [Depends(require_admin)]
+
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
+        readiness = selected.live_readiness()
         return {
             "status": "ok",
             "mode": selected.app_mode,
             "live_api_enabled": selected.api_live_enabled,
+            "ready_for_live_listing": all(readiness.values()),
+            "readiness": readiness,
             "amazon_source": "SP-API",
             "exact_amazon_stock_quantity": False,
         }
 
-    @app.post("/api/products/{asin}/fetch")
+    @app.post("/api/products/{asin}/fetch", dependencies=protected)
     async def fetch_product(asin: str, force: bool = Query(default=False)) -> dict[str, Any]:
         try:
             return (await container.catalog.fetch(asin, force=force)).model_dump()
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/products")
+    @app.get("/api/products", dependencies=protected)
     async def products() -> list[dict[str, Any]]:
         return [item.model_dump() for item in container.db.list_products()]
 
-    @app.post("/api/listings")
+    @app.post("/api/listings", dependencies=protected)
     async def create_listing(request: ListingRequest) -> dict[str, Any]:
         try:
             return {"results": await container.marketplaces.create_listings(request)}
@@ -92,11 +115,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/listings")
+    @app.get("/api/listings", dependencies=protected)
     async def listings() -> list[dict[str, Any]]:
         return container.db.list_listings()
 
-    @app.post("/api/sync/run")
+    @app.post("/api/sync/run", dependencies=protected)
     async def sync_run() -> dict[str, Any]:
         return await container.marketplaces.sync_all()
 
