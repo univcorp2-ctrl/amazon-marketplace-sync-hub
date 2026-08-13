@@ -19,7 +19,6 @@ def test_demo_fetch_and_listing(tmp_path: Path) -> None:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["amazon_source"] == "SP-API"
-
         fetched = client.post("/api/products/B0DEMO1234/fetch")
         assert fetched.status_code == 200
         assert fetched.json()["price"] == 3980
@@ -29,7 +28,6 @@ def test_demo_fetch_and_listing(tmp_path: Path) -> None:
             json={"asin": "B0DEMO1234", "channels": ["shopee"], "rights_confirmed": False},
         )
         assert blocked.status_code == 403
-
         listed = client.post(
             "/api/listings",
             json={
@@ -48,3 +46,32 @@ def test_invalid_asin(tmp_path: Path) -> None:
     with TestClient(create_app(settings)) as client:
         response = client.post("/api/products/invalid/fetch")
         assert response.status_code == 400
+
+
+def test_production_api_requires_admin_key(tmp_path: Path) -> None:
+    settings = Settings(
+        app_mode="production",
+        api_admin_key="k" * 32,
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        cors_origins=["https://admin.example.com"],
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/products").status_code == 401
+        assert client.get(
+            "/api/products", headers={"X-Admin-Key": "incorrect"}
+        ).status_code == 401
+        assert client.get(
+            "/api/products", headers={"X-Admin-Key": "k" * 32}
+        ).status_code == 200
+
+
+def test_production_api_without_admin_key_is_unavailable(tmp_path: Path) -> None:
+    settings = Settings(
+        app_mode="production",
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/products").status_code == 503
+        health = client.get("/api/health").json()
+        assert health["ready_for_live_listing"] is False
+        assert health["readiness"]["admin_auth"] is False
