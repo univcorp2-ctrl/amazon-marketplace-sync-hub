@@ -106,7 +106,6 @@ class Database:
             conflicts = [str(row["channel"]) for row in rows]
             if conflicts and not force:
                 return conflicts
-
             timestamp = utc_now_iso()
             for channel in channels:
                 connection.execute(
@@ -181,6 +180,17 @@ class Database:
                 (utc_now_iso(),),
             )
             return int(cursor.lastrowid)
+
+    def latest_sync_run(self) -> dict[str, Any] | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["detail"] = json.loads(item["detail"])
+        return item
 
     def finish_sync(self, run_id: int, status: str, detail: dict[str, Any]) -> None:
         with self._lock, self._connect() as connection:
