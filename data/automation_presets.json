@@ -1,0 +1,21 @@
+{
+  "version": "2026-08-14",
+  "notes": "Low-risk starting categories only; every product still passes blacklist and market checks.",
+  "categories": [
+    {"id":"stationery","label":"文房具・オフィス小物","query":"文房具 オフィス用品 ノート ペンケース ファイル","risk":"low"},
+    {"id":"desk_organization","label":"デスク整理用品","query":"デスク収納 ケーブル整理 卓上収納","risk":"low"},
+    {"id":"home_storage","label":"家庭用収納・整理用品","query":"収納ボックス 収納ケース 整理用品","risk":"low"},
+    {"id":"kitchen_non_electric","label":"キッチン収納・非電気小物","query":"キッチン収納 保存容器 調理小物 非電気","risk":"low"},
+    {"id":"cleaning_tools","label":"掃除道具（薬剤なし）","query":"掃除ブラシ クロス ほうき 収納 清掃用品","risk":"low"},
+    {"id":"craft_supplies","label":"手芸・クラフト用品","query":"手芸用品 クラフト用品 ビーズ 糸 工作","risk":"low"},
+    {"id":"travel_organizers","label":"旅行収納用品","query":"トラベルポーチ 旅行収納 パッキングキューブ","risk":"low"},
+    {"id":"phone_cases","label":"スマホケース・非電気スタンド","query":"スマホケース スマホスタンド 非充電","risk":"low"},
+    {"id":"computer_stands","label":"PCスタンド・非電気アクセサリ","query":"ノートPCスタンド パソコンスタンド 非電気","risk":"low"},
+    {"id":"pet_accessories","label":"ペット用品（食品・医薬品なし）","query":"ペット おもちゃ リード ボウル 収納 食品なし","risk":"low"},
+    {"id":"bath_storage","label":"浴室収納・非薬剤用品","query":"浴室収納 バス収納 ソープディッシュ","risk":"low"},
+    {"id":"laundry_accessories","label":"洗濯収納・ランドリー小物","query":"洗濯ネット 洗濯かご ハンガー ランドリー収納","risk":"low"},
+    {"id":"sewing_tools","label":"裁縫小物","query":"裁縫用品 糸 針ケース メジャー 手芸","risk":"low"},
+    {"id":"book_accessories","label":"読書・本整理用品","query":"ブックスタンド しおり ブックカバー 本収納","risk":"low"},
+    {"id":"simple_home_decor","label":"非電気インテリア小物","query":"インテリア小物 装飾 非電気 収納","risk":"low"}
+  ]
+}
