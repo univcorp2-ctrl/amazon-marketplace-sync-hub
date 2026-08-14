@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -75,7 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     docs_url = "/docs" if not selected.is_production or selected.enable_docs else None
     app = FastAPI(
         title=selected.app_name,
-        version="0.2.0",
+        version="0.3.0",
         lifespan=lifespan,
         docs_url=docs_url,
         redoc_url=None,
@@ -163,17 +164,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await container.marketplaces.bulk_shopee(request)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/policy/shopee", dependencies=[Depends(require_api_access)])
     async def shopee_policy() -> dict[str, Any]:
         policy = container.marketplaces.policy.data
-        return {"version": policy.get("version"), "supported_markets": policy.get("supported_markets", []), "deny": policy.get("deny", {}), "review": policy.get("review", {}), "strict": selected.shopee_policy_strict}
+        return {
+            "version": policy.get("version"),
+            "supported_markets": policy.get("supported_markets", []),
+            "deny": policy.get("deny", {}),
+            "review": policy.get("review", {}),
+            "market_overrides": policy.get("market_overrides", {}),
+            "sources": policy.get("sources", []),
+            "strict": selected.shopee_policy_strict,
+        }
+
+    @app.get("/api/presets", dependencies=[Depends(require_api_access)])
+    async def presets() -> dict[str, Any]:
+        path = Path("data/automation_presets.json")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/api/sync/status", dependencies=[Depends(require_api_access)])
+    async def sync_status() -> dict[str, Any]:
+        latest = container.db.latest_sync_run()
+        return {
+            "last_sync": latest,
+            "last_inventory_update_at": latest.get("finished_at") if latest else None,
+        }
 
     @app.get("/api/settings/public", dependencies=[Depends(require_api_access)])
     async def public_settings() -> dict[str, Any]:
-        return {"shopee_market": selected.shopee_market, "default_category_id": selected.shopee_default_category_id, "bulk_listing_enabled": selected.bulk_listing_enabled, "bulk_listing_per_run_cap": selected.bulk_listing_per_run_cap, "bulk_listing_daily_cap": selected.bulk_listing_daily_cap, "default_markup_percent": round((selected.price_markup - 1) * 100, 2), "default_fixed_profit": selected.price_fixed_fee, "default_minimum_margin": selected.minimum_margin, "sync_interval_seconds": selected.sync_interval_seconds}
+        return {
+            "shopee_market": selected.shopee_market,
+            "default_category_id": selected.shopee_default_category_id,
+            "bulk_listing_enabled": selected.bulk_listing_enabled,
+            "bulk_listing_per_run_cap": selected.bulk_listing_per_run_cap,
+            "bulk_listing_daily_cap": selected.bulk_listing_daily_cap,
+            "default_markup_percent": round((selected.price_markup - 1) * 100, 2),
+            "default_fixed_profit": selected.price_fixed_fee,
+            "default_minimum_margin": selected.minimum_margin,
+            "sync_interval_seconds": selected.sync_interval_seconds,
+        }
 
     @app.get("/api/listings", dependencies=[Depends(require_api_access)])
     async def listings() -> list[dict[str, Any]]:
