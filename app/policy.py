@@ -17,7 +17,12 @@ class PolicyDecision:
 
 
 class ShopeeProductPolicy:
-    def __init__(self, policy_path: str = "data/shopee_blacklist.json", *, strict: bool = True) -> None:
+    def __init__(
+        self,
+        policy_path: str = "data/shopee_blacklist.json",
+        *,
+        strict: bool = True,
+    ) -> None:
         path = Path(policy_path)
         if not path.exists():
             raise RuntimeError(f"Shopee policy file is missing: {path}")
@@ -31,25 +36,43 @@ class ShopeeProductPolicy:
     def evaluate(self, product: ProductRecord, market: str) -> PolicyDecision:
         market = market.strip().upper()
         if not market or market not in self.supported_markets:
-            return PolicyDecision(False, "deny", ["unsupported_or_unspecified_market"], [])
+            return PolicyDecision(
+                False, "deny", ["unsupported_or_unspecified_market"], []
+            )
         text = self._search_text(product)
         matches: list[str] = []
         reasons: list[str] = []
-        for group, terms in self.data.get("deny", {}).items():
+        deny_groups = dict(self.data.get("deny", {}))
+        deny_groups.update(
+            self.data.get("market_overrides", {}).get(market, {}).get("deny", {})
+        )
+        for group, terms in deny_groups.items():
             found = self._matches(text, terms)
             if found:
                 matches.extend(found)
                 reasons.append(f"deny:{group}")
         if reasons:
-            return PolicyDecision(False, "deny", sorted(set(reasons)), sorted(set(matches)))
+            return PolicyDecision(
+                False, "deny", sorted(set(reasons)), sorted(set(matches))
+            )
+
         review_reasons: list[str] = []
-        for group, terms in self.data.get("review", {}).items():
+        review_groups = dict(self.data.get("review", {}))
+        review_groups.update(
+            self.data.get("market_overrides", {}).get(market, {}).get("review", {})
+        )
+        for group, terms in review_groups.items():
             found = self._matches(text, terms)
             if found:
                 matches.extend(found)
                 review_reasons.append(f"review:{group}")
         if review_reasons:
-            return PolicyDecision(not self.strict, "review", sorted(set(review_reasons)), sorted(set(matches)))
+            return PolicyDecision(
+                not self.strict,
+                "review",
+                sorted(set(review_reasons)),
+                sorted(set(matches)),
+            )
         return PolicyDecision(True, "allow", [], [])
 
     def _search_text(self, product: ProductRecord) -> str:
